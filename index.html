@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#1a3c6e">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Divisional MIS Report</title>
+<style>
+  body { font-family:Arial, sans-serif; background:#f4f6f8; margin:0; padding:16px; }
+  .card { max-width:1050px; margin:auto; background:#fff; border-radius:10px; padding:20px 24px;
+          box-shadow:0 2px 10px rgba(0,0,0,0.08); }
+  h2 { color:#1a3c6e; margin-top:0; }
+  h4 { color:#e07b00; margin:14px 0 6px; }
+  .common-row { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; margin-bottom:14px; }
+  .common-row input, .common-row select { width:100%; box-sizing:border-box; padding:7px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .tab-btn, .subtab-btn { padding:8px 14px; border:1px solid #1a3c6e; background:#fff; color:#1a3c6e;
+             border-radius:6px; cursor:pointer; font-size:13px; }
+  .tab-btn.active { background:#1a3c6e; color:#fff; }
+  .subtab-btn.active { background:#e07b00; color:#fff; border-color:#e07b00; }
+  label { display:block; font-size:12px; color:#333; margin-top:6px; }
+  input, select { padding:6px; margin-top:2px; border:1px solid #ccc; border-radius:5px; font-size:13px; }
+  .flat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .flat-grid input { width:100%; box-sizing:border-box; }
+  table { border-collapse:collapse; width:100%; font-size:11px; margin-top:6px; }
+  th, td { border:1px solid #ddd; padding:4px; text-align:center; }
+  th { background:#eef2f7; color:#1a3c6e; }
+  td.rowlabel { text-align:left; font-weight:bold; background:#fafafa; min-width:140px; }
+  table input { width:65px; }
+  .scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  button.submit { margin-top:10px; background:#1a3c6e; color:#fff; border:none; padding:10px 18px;
+                  border-radius:6px; font-size:13px; cursor:pointer; }
+  button.submit:hover { background:#e07b00; }
+  button.submit:disabled { background:#aab3bd; cursor:not-allowed; }
+  .tab-btn:disabled, .subtab-btn:disabled { opacity:0.45; cursor:not-allowed; }
+  .lock-message { background:#eef2f7; border:1px dashed #aab3bd; border-radius:8px; padding:20px;
+                  text-align:center; color:#555; font-size:14px; margin-top:10px; }
+  .mode-row { margin-top:10px; font-size:13px; }
+  .mode-row label { display:inline; margin-right:16px; font-weight:normal; }
+  #msg { margin-top:12px; font-weight:bold; }
+
+  /* Portrait/mobile: single-column layout, bigger touch targets, no pinch-zoom needed to read text.
+     Matrix tables (ADJ-1, RFD-1, etc.) keep their own horizontal scroll via .scroll - genuinely wide
+     data tables need that on any screen size, phone or desktop, so they're left untouched. */
+  @media (max-width: 640px) {
+    body { padding:8px; }
+    .card { padding:14px 12px; border-radius:8px; }
+    h2 { font-size:19px; }
+    .common-row { grid-template-columns:1fr; gap:8px; }
+    .flat-grid { grid-template-columns:1fr 1fr; gap:8px; }
+    .tab-btn, .subtab-btn { padding:10px 12px; font-size:13px; flex:1 1 auto; text-align:center; }
+    input, select { font-size:16px; padding:9px; } /* 16px prevents auto-zoom-on-focus on mobile browsers */
+    button.submit { width:100%; padding:13px; font-size:15px; }
+    table input { width:56px; font-size:13px; padding:5px 3px; }
+    label { font-size:12.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Divisional MIS Report</h2>
+
+  <div class="common-row">
+    <div>
+      <label>Division</label>
+      <select id="Division">
+        <option value="">Select</option>
+        <option>HAL-1</option><option>HAL-2</option><option>JPD</option>
+        <option>KGP</option><option>A&N</option>
+      </select>
+    </div>
+    <div><label>Week Ending</label><select id="Week_Ending"><option value="">Select</option></select></div>
+    <div><label>Month (auto)</label><input type="text" id="Month" readonly style="background:#eef2f7;font-weight:bold;"></div>
+    <div><label>Password</label><input type="password" id="DivisionPassword"><span id="pwStatus" style="display:block;font-size:11px;margin-top:2px;"></span></div>
+  </div>
+
+  <div style="margin-bottom:16px;">
+    <button type="button" id="fetchPrevBtn" class="submit" style="background:#0d7a3f;" disabled>⬇ Fetch Previous Period Closing Balances</button>
+    <span id="fetchStatus" style="margin-left:10px;font-size:12px;color:#555;">Select Division and Week Ending above to continue.</span>
+  </div>
+  <div id="weekStatusBanner"></div>
+
+  <div class="tabs" id="topTabs"></div>
+  <div class="tabs" id="subTabs"></div>
+  <div id="formArea"></div>
+  <div id="msg"></div>
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {}); // silently skip if unsupported/blocked - the form works fine either way
+  });
+}
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxFBHZEOcyE64EdKMLlOB7Az2QsrlpJ6zF4iZU9yI_TjF_-ufVDYuBs3w16lN5ai6B1/exec";
+
+function prettify(id){ return id.replace(/_/g,' '); }
+function round3(n){
+  // Fixes JS floating-point artifacts (e.g. 64.84-61.93-2.91 = 3.552713678800501e-15, not 0)
+  // and caps every computed figure at 3 decimal places.
+  if (typeof n !== 'number' || !isFinite(n)) return 0;
+  return Math.round((n + Number.EPSILON) * 1000) / 1000;
+}
+
+// Confirmed Demands is filed once a month, on the first Friday only — a Friday is "first of its
+// month" whenever its day-of-month is 7 or less. Must match isFirstFridayOfMonth_ in Code.gs exactly.
+function isFirstFridayOfMonthJS_(weekEndingYMD){
+  const dd = parseInt(weekEndingYMD.split('-')[2], 10);
+  return dd <= 7;
+}
+function commonFields(){
+  return {
+    Division: document.getElementById('Division').value,
+    Week_Ending: document.getElementById('Week_Ending').value,
+    Month: document.getElementById('Month').value,
+    DivisionPassword: document.getElementById('DivisionPassword').value
+  };
+}
+
+// ---- Password validation — checked against the Sheet's "Auth" tab via Apps Script, never stored here ----
+let passwordCheckState = 'empty'; // 'empty' | 'checking' | 'correct' | 'incorrect'
+let passwordDebounceTimer = null;
+
+// Shared by every JSONP call in this file. A plain 'onerror' only catches an outright network
+// failure to load the script — it does NOT catch the case where the server responds but, for any
+// reason, never actually invokes the callback (a slow cold start right after a fresh deploy, a
+// transient execution error, etc.). Without a timeout that case hangs forever with no recovery —
+// this is what actually happened after the Code.gs update: the UI got stuck on "Checking...".
+// This wraps every call with a timeout so it always eventually resolves, one way or another.
+function jsonpWithTimeout_(url, cbPrefix, timeoutResult, timeoutMs){
+  // 35s, not 12s: real-world testing showed genuine (successful) server responses taking as long as
+  // 27 seconds on a data-heavy sheet — the old 12s timeout was cutting those off right before they
+  // would have succeeded, showing "could not verify" moments before the real answer arrived.
+  timeoutMs = timeoutMs || 35000;
+  return new Promise((resolve) => {
+    const cbName = cbPrefix + '_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+    const script = document.createElement('script');
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(timeoutResult);
+    }, timeoutMs);
+    function cleanup(){
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      clearTimeout(timer);
+    }
+    window[cbName] = function(data){
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(data);
+    };
+    script.src = url + (url.indexOf('?') > -1 ? '&' : '?') + 'callback=' + cbName;
+    script.onerror = function(){
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(timeoutResult);
+    };
+    document.body.appendChild(script);
+  });
+}
+
+function checkPasswordJSONP(division, password){
+  const url = SCRIPT_URL + '?action=checkPassword&division=' + encodeURIComponent(division) +
+    '&password=' + encodeURIComponent(password);
+  return jsonpWithTimeout_(url, 'jsonp_pw', { status:'error', correct:false });
+}
+
+function passwordIsCorrect(){
+  return passwordCheckState === 'correct';
+}
+
+function schedulePasswordCheck(){
+  const division = document.getElementById('Division').value;
+  const pw = document.getElementById('DivisionPassword').value;
+  clearTimeout(passwordDebounceTimer);
+  if (!division || !pw) {
+    passwordCheckState = 'empty';
+    updatePasswordStatus();
+    updateLockState();
+    return;
+  }
+  passwordCheckState = 'checking';
+  updatePasswordStatus();
+  updateLockState();
+  passwordDebounceTimer = setTimeout(async () => {
+    const result = await checkPasswordJSONP(division, pw);
+    // Ignore a stale reply if Division/Password changed again while this check was in flight.
+    if (document.getElementById('Division').value !== division || document.getElementById('DivisionPassword').value !== pw) return;
+    passwordCheckState = (result && result.status === 'success' && result.correct) ? 'correct' : 'incorrect';
+    updatePasswordStatus();
+    updateLockState();
+  }, 400);
+}
+
+function updatePasswordStatus(){
+  const division = document.getElementById('Division').value;
+  const pw = document.getElementById('DivisionPassword').value;
+  const el = document.getElementById('pwStatus');
+  if (!division) { el.textContent = ''; return; }
+  if (!pw) { el.textContent = 'Enter your division\'s password.'; el.style.color = '#555'; return; }
+  if (passwordCheckState === 'checking') { el.textContent = 'Checking...'; el.style.color = '#555'; }
+  else if (passwordCheckState === 'correct') { el.textContent = '✓ Correct'; el.style.color = '#0d7a3f'; }
+  else { el.textContent = '✗ Incorrect password for ' + division; el.style.color = 'red'; }
+}
+
+function initCommonFields(){
+  const now = new Date();
+  // Month (auto) starts blank — it's set the moment a Week Ending is picked (see updateMonthFromWeekEnding),
+  // since the reporting month should match the period being filed, not just whatever day it happens to be today.
+  document.getElementById('Month').value = '';
+
+  // The first week the online system actually went live — no report can genuinely exist for
+  // anything before this, so the dropdown (and, on the backend, the "earlier pending" checks and
+  // reminder emails) must never reach back further than this date. Change this once, here, if the
+  // system's real go-live date is different.
+  const SYSTEM_START_DATE = '2026-08-07';
+
+  // Week Ending — every Friday. Past weeks go back far enough (10 weeks, floored at
+  // SYSTEM_START_DATE) that any period the "earlier pending period" check could ever reference is
+  // always reachable here — previously this only showed the current calendar month, which meant a
+  // genuinely pending week from an earlier month had no way to actually be selected and filed.
+  // Future weeks stay capped to the rest of the current month, as before. Each Friday unlocks the
+  // day before (Thursday) — a division can submit a day early, which matters if that Friday turns
+  // out to be a holiday.
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // strip time for a clean date-only comparison
+  const currentMonth = now.getMonth(), currentYear = now.getFullYear();
+
+  // Labels each Friday by its own position within ITS OWN month (so this stays correct even when
+  // the dropdown spans more than one calendar month).
+  function fridayOrdinalLabel(dt) {
+    const ordinal = Math.ceil(dt.getDate() / 7);
+    return ['1st','2nd','3rd','4th','5th'][ordinal - 1] + ' Friday';
+  }
+  function toYMD(dt) {
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  }
+
+  // Find the most recent Friday on/before today, as the anchor to count backward from.
+  let anchorFriday = new Date(today);
+  const anchorDiff = (anchorFriday.getDay() + 2) % 7;
+  anchorFriday.setDate(anchorFriday.getDate() - anchorDiff);
+
+  const WEEKS_BACK = 10;
+  const fridaysToShow = [];
+  for (let i = WEEKS_BACK; i >= 0; i--) {
+    const dt = new Date(anchorFriday);
+    dt.setDate(anchorFriday.getDate() - i * 7);
+    if (toYMD(dt) < SYSTEM_START_DATE) continue; // never show a week before the system existed
+    fridaysToShow.push(dt);
+  }
+  // Also include any remaining Fridays later in the current month (shown disabled, for visibility).
+  let probe = new Date(anchorFriday);
+  probe.setDate(probe.getDate() + 7);
+  while (probe.getMonth() === currentMonth && probe.getFullYear() === currentYear) {
+    fridaysToShow.push(new Date(probe));
+    probe.setDate(probe.getDate() + 7);
+  }
+
+  const sel = document.getElementById('Week_Ending');
+  fridaysToShow.forEach(dt => {
+    const unlockDate = new Date(dt); unlockDate.setDate(dt.getDate() - 1); // opens the day before (Thursday)
+    const dd = String(dt.getDate()).padStart(2,'0');
+    const mm = String(dt.getMonth()+1).padStart(2,'0');
+    const yyyy = dt.getFullYear();
+    const opt = document.createElement('option');
+    opt.value = yyyy + '-' + mm + '-' + dd;
+    opt.textContent = fridayOrdinalLabel(dt) + ' (' + dd + '-' + mm + '-' + yyyy + ')' + (unlockDate > today ? ' — upcoming' : '');
+    if (unlockDate > today) opt.disabled = true;
+    sel.appendChild(opt);
+  });
+}
+
+function updateMonthFromWeekEnding(){
+  const weekVal = document.getElementById('Week_Ending').value; // "yyyy-mm-dd" or ""
+  if (!weekVal) { document.getElementById('Month').value = ''; return; }
+  // The first Friday of every month is when the previous month's figures get finalized (this is
+  // also exactly the week that reads the locked Monthly Closing as its Opening Balance) - so this
+  // week's Month is shown and stored as the PREVIOUS month, tagged (MPR), for every report, not
+  // just Confirmed Demands or RTN-1.
+  if (isFirstFridayOfMonthJS_(weekVal)) {
+    document.getElementById('Month').value = getPreviousMonthLabelMPR_(weekVal);
+    return;
+  }
+  const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const parts = weekVal.split('-');
+  const yy = parts[0].slice(-2);
+  const mIdx = parseInt(parts[1], 10) - 1;
+  document.getElementById('Month').value = monthNames[mIdx] + '-' + yy;
+}
+document.getElementById('Week_Ending').addEventListener('change', updateMonthFromWeekEnding);
+
+// Confirmed Demands and RTN-1 are filed on the first Friday of a NEW month, but the figures they
+// report actually finalize the PREVIOUS month (e.g. filed on 4-Sep, but reporting August's
+// confirmed demands / return filing status). Their stored "Month" should reflect that, not the
+// calendar month of the filing date itself.
+function getPreviousMonthLabelMPR_(weekEndingYMD){
+  const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const parts = weekEndingYMD.split('-');
+  let mIdx = parseInt(parts[1], 10) - 1 - 1; // -1 for 0-index, -1 more for "previous month"
+  let yy = parseInt(parts[0].slice(-2), 10);
+  if (mIdx < 0) { mIdx = 11; yy -= 1; } // January's previous month is December of the prior year
+  return monthNames[mIdx] + '-' + String(yy).padStart(2,'0') + ' (MPR)';
+}
+
+// ---- Fetch Previous Period Closing Balances (carry-forward as this period's Opening) ----
+let previousPeriodData = {}; // reportType -> {status, found, week, rows}
+let formUnlocked = false; // becomes true only after Fetch has been clicked with both Division & Week Ending set
+const CARRY_FORWARD_REPORTS = ['Reg1','Reg2','RFD1','UIN_Summary','SBY','Adj1','ITC','ConfirmedDemands'];
+
+// ---- Form field state — keeps what's been typed when switching tabs, so nothing is lost until
+// Division/Week Ending/Password actually changes (cleared then, since it'd belong to a different period). ----
+let formFieldState = {};
+function saveFieldState(key, value){ formFieldState[key] = value; }
+function getFieldState(key, fallback){ return formFieldState[key] !== undefined ? formFieldState[key] : fallback; }
+
+function fetchPreviousJSONP(reportType, division, beforeWeek, password){
+  const url = SCRIPT_URL + '?action=fetchPrevious&reportType=' + encodeURIComponent(reportType) +
+    '&division=' + encodeURIComponent(division) + '&beforeWeek=' + encodeURIComponent(beforeWeek) +
+    '&password=' + encodeURIComponent(password);
+  return jsonpWithTimeout_(url, 'jsonp_cb_' + reportType, { status:'error', found:false });
+}
+
+// Replaces what used to be 9 separate fetchPreviousJSONP calls (one per carry-forward report) with
+// a single request — the password is checked once server-side instead of 9 times, and the
+// spreadsheet is opened once instead of 9 times. This is the fix for "Fetch Previous Period" being
+// noticeably slow, since that overhead was previously paid 9 times over on every click.
+function fetchAllPreviousJSONP(division, beforeWeek, password){
+  const url = SCRIPT_URL + '?action=fetchAllPrevious&division=' + encodeURIComponent(division) +
+    '&beforeWeek=' + encodeURIComponent(beforeWeek) + '&password=' + encodeURIComponent(password) +
+    '&reportTypes=' + encodeURIComponent(CARRY_FORWARD_REPORTS.join(','));
+  return jsonpWithTimeout_(url, 'jsonp_all_prev', { status:'error' });
+}
+
+function findPrevRow(cfg, labels){
+  const data = previousPeriodData[cfg.sheet];
+  if (!data || !data.found) return null;
+  return data.rows.find(r => cfg.rowLabelKeys.every((k,i) => String(r[k]) === String(labels[i]))) || null;
+}
+
+function checkWeekStatusJSONP(division, weekEnding, password){
+  const url = SCRIPT_URL + '?action=checkWeekStatus&division=' + encodeURIComponent(division) +
+    '&weekEnding=' + encodeURIComponent(weekEnding) + '&password=' + encodeURIComponent(password);
+  return jsonpWithTimeout_(url, 'jsonp_ws', { status:'error' });
+}
+
+// Tells the officer, right when they select a period, whether it's already fully filed, partially
+// pending, or entirely pending — naming the exact tab(s) still missing. Only re-checks when the
+// Division+Week actually changes (not on every password keystroke), and ignores a stale response
+// if the selection changes again before the check finishes.
+let lastWeekStatusKey = null;
+async function updateWeekStatusBanner(){
+  const banner = document.getElementById('weekStatusBanner');
+  const division = document.getElementById('Division').value;
+  const week = document.getElementById('Week_Ending').value;
+  if (!division || !week || !passwordIsCorrect()) {
+    banner.innerHTML = ''; // a transient password-checking flicker shouldn't force a re-check once it resolves back to the same correct password — lastWeekStatusKey is deliberately left alone here
+    return;
+  }
+  const key = division + '|' + week;
+  if (key === lastWeekStatusKey) return; // already checked this exact Division+Week combination
+  lastWeekStatusKey = key;
+
+  const password = document.getElementById('DivisionPassword').value;
+  banner.innerHTML = '<p style="font-size:12px;color:#555;">Checking this period\'s filing status... (this can take up to 30 seconds on a busy sheet)</p>';
+  const result = await checkWeekStatusJSONP(division, week, password);
+  // If the selection changed while this was in flight, a newer check has already taken over — drop this one.
+  if (key !== (document.getElementById('Division').value + '|' + document.getElementById('Week_Ending').value)) return;
+
+  if (result.status !== 'success') { banner.innerHTML = ''; return; }
+  let html = '';
+  if (result.earlierPending && result.earlierPending.length > 0) {
+    const sections = result.earlierPending.map(ep => {
+      const [yyyy, mm, dd] = ep.week.split('-');
+      const displayDate = dd + '-' + mm + '-' + yyyy;
+      return '<p style="margin:4px 0 2px;"><b>Week Ending ' + displayDate + ':</b></p><ul style="margin:0 0 6px 20px;padding:0;">' + ep.missing.map(m => '<li>' + m + '</li>').join('') + '</ul>';
+    }).join('');
+    html += '<div style="background:#fdecea;border:1px solid #f5c2c0;color:#7a1f1a;padding:8px 12px;border-radius:6px;font-size:12px;margin:6px 0;">' +
+      '<p style="margin:0 0 4px;">⚠ <b>An earlier period is still pending.</b> Please file the following period(s) first, then come back to file this one:</p>' +
+      sections + '</div>';
+  }
+  if (result.missing.length === 0) {
+    html += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 12px;border-radius:6px;font-size:12px;color:#1b5e20;margin:6px 0;">✓ You have already filed this period completely — every required report for this Week Ending has been submitted.</p>';
+  } else {
+    const fullyPending = result.missing.length === result.totalRequired;
+    const wholeOrPartial = fullyPending ? 'This period is completely pending — nothing has been filed yet.' : 'This period is partially pending.';
+    const bg = fullyPending ? '#fdecea' : '#fff3cd';
+    const border = fullyPending ? '#f5c2c0' : '#ffe08a';
+    const textColor = fullyPending ? '#7a1f1a' : '#856404';
+    html += '<p style="background:' + bg + ';border:1px solid ' + border + ';color:' + textColor + ';padding:8px 12px;border-radius:6px;font-size:12px;margin:6px 0;">⚠ ' + wholeOrPartial + ' Please file the following for this period, then continue:</p>' +
+      '<ul style="font-size:12px;color:' + textColor + ';margin:0 0 8px 20px;padding:0;">' + result.missing.map(m => '<li>' + m + '</li>').join('') + '</ul>';
+  }
+  banner.innerHTML = html;
+}
+
+// ---- Lock/unlock sequence ----
+// 1) Nothing selected: Fetch button disabled, form shows a lock message.
+// 2) Division AND Week Ending both selected AND the correct password for that Division entered: Fetch button enables.
+// 3) Fetch clicked: form fully unlocks for data entry.
+// 4) Division, Week Ending, or Password changed after unlocking: form re-locks, must Fetch again.
+function updateLockState(){
+  const division = document.getElementById('Division').value;
+  const week = document.getElementById('Week_Ending').value;
+  updatePasswordStatus();
+  const ready = !!division && !!week && passwordIsCorrect();
+  document.getElementById('fetchPrevBtn').disabled = !ready;
+  const statusEl = document.getElementById('fetchStatus');
+  if (!division || !week) {
+    statusEl.textContent = 'Select Division and Week Ending above to continue.';
+    statusEl.style.color = '#555';
+  } else if (passwordCheckState === 'checking') {
+    statusEl.textContent = 'Checking password...';
+    statusEl.style.color = '#555';
+  } else if (!passwordIsCorrect()) {
+    statusEl.textContent = 'Enter your division\'s password above to continue.';
+    statusEl.style.color = '#555';
+  } else if (!formUnlocked) {
+    statusEl.textContent = 'Ready — click "Fetch Previous Period Closing Balances" above to unlock the form.';
+    statusEl.style.color = '#0d7a3f';
+  }
+  renderTabs();
+  renderForm();
+  updateWeekStatusBanner();
+}
+
+document.getElementById('fetchPrevBtn').addEventListener('click', async function(){
+  const division = document.getElementById('Division').value;
+  const week = document.getElementById('Week_Ending').value;
+  const password = document.getElementById('DivisionPassword').value;
+  const statusEl = document.getElementById('fetchStatus');
+  if (!division || !week || !passwordIsCorrect()) {
+    statusEl.textContent = '⚠ Select Division and Week Ending, and enter the correct password, first.';
+    statusEl.style.color = 'red';
+    return;
+  }
+
+  // Gate: an earlier period must be fully filed before this one can be unlocked. Checked fresh
+  // right here (not relying on the informational banner above, which could be stale) so this is a
+  // real enforcement point, not just a warning.
+  statusEl.textContent = 'Checking whether earlier periods are fully filed...';
+  statusEl.style.color = '#333';
+  const statusResult = await checkWeekStatusJSONP(division, week, password);
+  // If the selection changed while this was checking, don't act on a now-stale answer.
+  if (division !== document.getElementById('Division').value || week !== document.getElementById('Week_Ending').value) return;
+
+  if (statusResult.status !== 'success') {
+    // Fail safe: if we can't confirm earlier periods are clear, don't unlock — ask to retry rather
+    // than risk silently allowing an out-of-order submission through.
+    statusEl.innerHTML = '⚠ Could not verify earlier periods\' filing status — please try clicking Fetch again.';
+    statusEl.style.color = 'red';
+    return;
+  }
+  if (statusResult.earlierPending && statusResult.earlierPending.length > 0) {
+    const list = statusResult.earlierPending.map(ep => {
+      const [yyyy, mm, dd] = ep.week.split('-');
+      return dd + '-' + mm + '-' + yyyy;
+    }).join(', ');
+    statusEl.innerHTML = '⛔ Cannot proceed — an earlier period (Week Ending ' + list + ') is still pending for ' + division + '. Please switch to that Week Ending above and file it first, then come back to file this period.';
+    statusEl.style.color = 'red';
+    return; // form stays locked — no fetch, no unlock
+  }
+
+  statusEl.textContent = 'Fetching previous period data...';
+  statusEl.style.color = '#333';
+  previousPeriodData = {};
+  const batchResult = await fetchAllPreviousJSONP(division, week, password);
+  if (batchResult.status !== 'success') {
+    statusEl.innerHTML = '⚠ Could not fetch previous period data — please try clicking Fetch again.';
+    statusEl.style.color = 'red';
+    return;
+  }
+  CARRY_FORWARD_REPORTS.forEach(rt => { previousPeriodData[rt] = batchResult.results[rt]; });
+  const foundCount = CARRY_FORWARD_REPORTS.filter(rt => previousPeriodData[rt] && previousPeriodData[rt].found).length;
+  statusEl.textContent = '✅ Fetched — Opening balances pre-filled for ' + foundCount + ' of ' + CARRY_FORWARD_REPORTS.length + ' reports with prior data for ' + division + '. Form unlocked for data entry.';
+  statusEl.style.color = 'green';
+  formUnlocked = true;
+  renderTabs();
+  renderForm();
+});
+
+function relockAndUpdate(){
+  if (formUnlocked || Object.keys(previousPeriodData).length > 0) {
+    previousPeriodData = {};
+    formUnlocked = false;
+    formFieldState = {};
+  }
+  updateLockState();
+}
+document.getElementById('Division').addEventListener('change', () => {
+  document.getElementById('DivisionPassword').value = ''; // a stale password for a different division must not carry over
+  passwordCheckState = 'empty';
+  clearTimeout(passwordDebounceTimer);
+  lastWeekStatusKey = null; // a different Division always needs a fresh filing-status check
+  relockAndUpdate();
+});
+document.getElementById('Week_Ending').addEventListener('change', () => {
+  lastWeekStatusKey = null; // a different Week Ending always needs a fresh filing-status check
+  relockAndUpdate();
+});
+document.getElementById('DivisionPassword').addEventListener('input', () => {
+  relockAndUpdate();
+  schedulePasswordCheck();
+});
+
+function post(reportType, rows, mode){
+  document.getElementById('msg').textContent = "Submitting...";
+  document.getElementById('msg').style.color = "#333";
+  const divisionPassword = rows.length ? rows[0].DivisionPassword : '';
+  fetch(SCRIPT_URL, {
+    method:"POST",
+    mode:"no-cors",
+    body: JSON.stringify({ ReportType: reportType, Mode: mode, DivisionPassword: divisionPassword, rows: rows }),
+    headers: { "Content-Type":"text/plain;charset=utf-8" }
+  }).then(()=>{
+    document.getElementById('msg').textContent = "✅ Sent as " + mode + " (" + rows.length + " row(s)) to " + reportType + " — check the Sheet to confirm it landed.";
+    document.getElementById('msg').style.color = "green";
+  }).catch(()=>{
+    document.getElementById('msg').textContent = "❌ Submission failed. Try again.";
+    document.getElementById('msg').style.color = "red";
+  });
+}
+
+function checkExistsJSONP(reportType, division, week){
+  const url = SCRIPT_URL + '?action=checkExists&reportType=' + encodeURIComponent(reportType) +
+    '&division=' + encodeURIComponent(division) + '&week=' + encodeURIComponent(week);
+  return jsonpWithTimeout_(url, 'jsonp_chk_' + reportType, { status:'error', exists:false });
+}
+
+async function submitWithModeCheck(reportType, rows, mode){
+  const first = rows[0] || {};
+  const division = first.Division, week = first.Week_Ending;
+  const msgEl = document.getElementById('msg');
+  if (!division || !week) {
+    msgEl.textContent = '⚠ Select Division and Week Ending first.';
+    msgEl.style.color = 'red';
+    return;
+  }
+  msgEl.textContent = 'Checking existing data...';
+  msgEl.style.color = '#333';
+  const check = await checkExistsJSONP(reportType, division, week);
+  if (mode === 'New' && check && check.status === 'success' && check.exists) {
+    msgEl.textContent = '❌ Data has already been filled for this period (' + reportType + ', ' + division + ', ' + week + '). Switch to "Update" if you want to replace it.';
+    msgEl.style.color = 'red';
+    return;
+  }
+  post(reportType, rows, mode);
+}
+
+function buildModeRow(stateKey){
+  const div = document.createElement('div');
+  div.className = 'mode-row';
+  const savedMode = getFieldState(stateKey + '_Mode', 'New');
+  div.innerHTML =
+    '<label><input type="radio" name="submitMode" value="New"' + (savedMode === 'New' ? ' checked' : '') + '> New</label>' +
+    '<label><input type="radio" name="submitMode" value="Update"' + (savedMode === 'Update' ? ' checked' : '') + '> Update</label>';
+  div.querySelectorAll('input[name="submitMode"]').forEach(r => {
+    r.addEventListener('change', () => saveFieldState(stateKey + '_Mode', r.value));
+  });
+  return div;
+}
+function getSelectedMode(wrap){
+  const checked = wrap.querySelector('input[name="submitMode"]:checked');
+  return checked ? checked.value : 'New';
+}
+
+// ---- Data for the repeating (matrix) reports ----
+const refundCategories = [
+  ["Assessment/Provisional Assessment/Appellate Order"],
+  ["Supplies to SEZ Unit/Developer w/o payment of Tax"],
+  ["Supplies to SEZ Unit/Developer with payment of Tax"],
+  ["Inverted Duty Structure"],
+  ["Export of services - with payment of Tax"],
+  ["Export of Goods/Services w/o payment (Accumulated ITC)"],
+  ["Deemed Export (Accumulated ITC)"],
+  ["Refund by Recipient of Deemed Export"],
+  ["Cash Ledger Balance"],
+  ["Excess / Wrong payment of Tax"],
+  ["Intra-State later held Inter-State & vice versa"],
+  ["Any Other"]
+];
+const refundFields = ["Opening_No","Opening_Amt","RFD01_Received_No","RFD01_Received_Amt","RFD02_Within15Days_No","RFD03_No","RFD03_Amt","RFD04_DeficiencyMemo_No","RFD04_DeficiencyMemo_Amt","Sanctioned_No","Sanctioned_Amt","Rejected_No","Rejected_Amt"];
+const refundComputed = [
+  { id:'Closing_No', calc:g => g('Opening_No')+g('RFD01_Received_No')-g('RFD03_No')-g('Sanctioned_No')-g('Rejected_No') },
+  { id:'Closing_Amt', calc:g => g('Opening_Amt')+g('RFD01_Received_Amt')-g('RFD03_Amt')-g('Sanctioned_Amt')-g('Rejected_Amt') }
+];
+const refundAgeWise = ["Age_0to30_No","Age_0to30_Amt","Age_30to45_No","Age_30to45_Amt","Age_46to60_No","Age_46to60_Amt","Age_Above60_No","Age_Above60_Amt"];
+// Same auto-fill-but-editable treatment as ADJ-1's Age-Wise/Time-Left fields above.
+const refundAgeWiseEditable = refundAgeWise.map(f => ({ from: f, to: f }));
+
+const adjRows = [
+  ["DC/AC","CGST COMMISSIONERATE"],["DC/AC","AUDIT COMMISSIONERATE"],["DC/AC","OTHER INVESTIGATION AGENCIES"],["DC/AC","REMAND CASES"],
+  ["SUPDT","CGST COMMISSIONERATE"],["SUPDT","AUDIT COMMISSIONERATE"],["SUPDT","OTHER INVESTIGATION AGENCIES"],["SUPDT","REMAND CASES"]
+];
+const adjFields = ["Opening_No","Opening_Amt","ReceiptDuringMonth_No","ReceiptDuringMonth_Amt","Disposal_Order_No","Disposal_Order_Amt","Disposal_CallBook_No","Disposal_CallBook_Amt","Disposal_Other_No","Disposal_Other_Amt","PH_Not_Issued_30Days"];
+// Age-Wise Breakup and Time-Left-for-Adjudication now auto-fill from last period's own value (like
+// ITC-1's Pending Over 1 Year already did) instead of starting blank every week — still fully
+// editable, so a genuine change can still be entered.
+const adjAgeAndTimeLeftEditable = [
+  { from:'TimeLeft_Less3Months', to:'TimeLeft_Less3Months' }, { from:'TimeLeft_3to6Months', to:'TimeLeft_3to6Months' },
+  { from:'TimeLeft_6to12Months', to:'TimeLeft_6to12Months' }, { from:'TimeLeft_MoreThan1Year', to:'TimeLeft_MoreThan1Year' },
+  { from:'Age_Less3Months', to:'Age_Less3Months' }, { from:'Age_3to6Months', to:'Age_3to6Months' },
+  { from:'Age_6to12Months', to:'Age_6to12Months' }, { from:'Age_MoreThan1Year', to:'Age_MoreThan1Year' }
+];
+const adjComputed = [
+  { id:'Closing_No', calc:g => g('Opening_No')+g('ReceiptDuringMonth_No')-g('Disposal_Order_No')-g('Disposal_CallBook_No')-g('Disposal_Other_No') },
+  { id:'Closing_Amt', calc:g => g('Opening_Amt')+g('ReceiptDuringMonth_Amt')-g('Disposal_Order_Amt')-g('Disposal_CallBook_Amt')-g('Disposal_Other_Amt') }
+];
+const adjCumulative = [
+  { during:'ReceiptDuringMonth_No', upto:'ReceiptUptoMonth_No' },
+  { during:'ReceiptDuringMonth_Amt', upto:'ReceiptUptoMonth_Amt' },
+  { during:'Disposal_Order_No', upto:'Disposal_Order_UptoMonth_No' },
+  { during:'Disposal_Order_Amt', upto:'Disposal_Order_UptoMonth_Amt' },
+  { during:'Disposal_CallBook_No', upto:'Disposal_CallBook_UptoMonth_No' },
+  { during:'Disposal_CallBook_Amt', upto:'Disposal_CallBook_UptoMonth_Amt' },
+  { during:'Disposal_Other_No', upto:'Disposal_Other_UptoMonth_No' },
+  { during:'Disposal_Other_Amt', upto:'Disposal_Other_UptoMonth_Amt' }
+];
+
+const adj1aRows = [
+  ["DC/AC","CGST COMMISSIONERATE"],["DC/AC","AUDIT COMMISSIONERATE"],["DC/AC","OTHER INVESTIGATION AGENCIES"],["DC/AC","REMAND CASES"],
+  ["SUPDT","CGST COMMISSIONERATE"],["SUPDT","AUDIT COMMISSIONERATE"],["SUPDT","OTHER INVESTIGATION AGENCIES"],["SUPDT","REMAND CASES"]
+];
+const adj1aFields = ["DemandConfirmed_No","DemandConfirmed_Amt","DemandDropped_No","DemandDropped_Amt","PartiallyConfirmed_No","PartiallyConfirmed_Amt","PartiallyDropped_No","PartiallyDropped_Amt","TransferredOther_No","TransferredOther_Amt"];
+
+const itcGrounds = [
+  ["Credit availed - Supplier found non-existent"],
+  ["Credit availed without receiving goods/services"],
+  ["Credit on invoices/debit notes - tax not paid to Govt."],
+  ["Claimant found non-existent / no business activity"],
+  ["Credit availed without valid document"],
+  ["Others"]
+];
+const itcFields = ["Opening_No","Opening_Amt","Blocked_No","Blocked_Amt","Unblocked_No","Unblocked_Amt"];
+const itcComputed = [
+  { id:'Closing_No', calc:g => g('Opening_No')+g('Blocked_No')-g('Unblocked_No') },
+  { id:'Closing_Amt', calc:g => g('Opening_Amt')+g('Blocked_Amt')-g('Unblocked_Amt') }
+];
+const itcPendingOver1Yr = [
+  { from:'PendingOver1Yr_No', to:'PendingOver1Yr_No' },
+  { from:'PendingOver1Yr_Amt', to:'PendingOver1Yr_Amt' }
+];
+
+const UIN_SUMMARY_CFG = { label:'UIN Refund — Summary (RFD-2)', sheet:'UIN_Summary',
+  fields:["Opening_No","Opening_Amt","Receipt_No","Receipt_Amt","ReceiptByTransfer_No","ReceiptByTransfer_Amt","NotFitDM_No","NotFitDM_Amt","Disposal_No","Disposal_Amt","DisposalByTransfer_No","DisposalByTransfer_Amt"],
+  computed: [
+    { id:'Closing_No', calc:g => g('Opening_No')+g('Receipt_No')+g('ReceiptByTransfer_No')-g('NotFitDM_No')-g('Disposal_No')-g('DisposalByTransfer_No') },
+    { id:'Closing_Amt', calc:g => g('Opening_Amt')+g('Receipt_Amt')+g('ReceiptByTransfer_Amt')-g('NotFitDM_Amt')-g('Disposal_Amt')-g('DisposalByTransfer_Amt') }
+  ],
+  carryForward: [ { from:'Closing_No', to:'Opening_No' }, { from:'Closing_Amt', to:'Opening_Amt' } ] };
+const UIN_CASES_CFG = { label:'UIN Refund — Case Details (RFD-2A)', sheet:'UIN_Cases',
+  fields:["State_Name","UIN_Entity_Name","UIN","Period_From","Period_To","Status","State_Refund_Sanctioned_For","Central_Tax","State_UT_Tax","Integrated_Tax","Cess"] };
+
+// ---- Shared cross-report validation state ----
+// Filled live as ADJ-1 is typed into, so ADJ-1A can check its break-up against it.
+let adj1Snapshot = null;
+
+// ---- The master menu: every tab and sub-tab in the form ----
+const cdRows = [["HAL-1"],["HAL-2"],["JPD"],["KGP"],["A&N"]];
+// Each column-group has No / Cash / ITC (Total is computed = Cash + ITC).
+// PrevMonth carries forward (locked) from last period's CurrMonth. YTD groups are cumulative (baseline + this period's CurrMonth).
+const cdGroups = [
+  { key:'PrevMonth',      label:'Previous Month',                  mode:'carry' },   // locked, carried from CurrMonth
+  { key:'CurrMonth',      label:'Current Month',                   mode:'input' },   // typed
+  { key:'CurrMonthPrevFY',label:'Current Month (Previous FY)',     mode:'input' },   // typed
+  { key:'YTDCurrFY',      label:'Year to Date (Current FY)',       mode:'cumul', from:'CurrMonth' },        // baseline + CurrMonth
+  { key:'YTDPrevFY',      label:'Year to Date (Previous FY)',      mode:'cumul', from:'CurrMonthPrevFY' }   // baseline + CurrMonthPrevFY
+];
+
+const CONFIG = {
+  Registration: { title:"Registration", subtabs:[
+    { id:'REG1', label:'REG-1: Taxpayer Count', sheet:'Reg1', type:'flat',
+      fields:["Opening_Taxpayers","New_Added","Migration_In","Migration_Out","Cancel_SuoMoto","Cancel_OnRequest","Revocation"],
+      computed: [
+        { id:'Closing_Taxpayers', calc:g => g('Opening_Taxpayers')+g('New_Added')+g('Migration_In')-g('Migration_Out')-g('Cancel_SuoMoto')-g('Cancel_OnRequest')+g('Revocation') }
+      ],
+      carryForward: [ { from:'Closing_Taxpayers', to:'Opening_Taxpayers' } ] },
+    { id:'REG2', label:'REG-2: Cancellation & Revocation', sheet:'Reg2', type:'flat',
+      fields:["SuoMoto_Opening","SuoMoto_Liable_29_2","SuoMoto_Cancelled","Request_Opening","Request_Applications_29_1","Request_Cancelled","Revocation_Opening","Revocation_ARN_Received","Revocation_Revoked","Revocation_Rejected"],
+      computed: [
+        { id:'SuoMoto_Pending', calc:g => g('SuoMoto_Opening')+g('SuoMoto_Liable_29_2')-g('SuoMoto_Cancelled') },
+        { id:'Request_Pending', calc:g => g('Request_Opening')+g('Request_Applications_29_1')-g('Request_Cancelled') },
+        { id:'Total_Pendency', calc:g => g('SuoMoto_Pending')+g('Request_Pending') },
+        { id:'Revocation_ARN_Pending', calc:g => g('Revocation_Opening')+g('Revocation_ARN_Received')-g('Revocation_Revoked')-g('Revocation_Rejected') }
+      ],
+      carryForward: [
+        { from:'SuoMoto_Pending', to:'SuoMoto_Opening' },
+        { from:'Request_Pending', to:'Request_Opening' },
+        { from:'Revocation_ARN_Pending', to:'Revocation_Opening' }
+      ] }
+  ]},
+  Refund: { title:"Refund", subtabs:[
+    { id:'RFD1', label:'RFD-1: Main Refund', sheet:'RFD1', type:'matrix', rowLabelKeys:['Category'], rows:refundCategories, fields:refundFields, computedFields:refundComputed,
+      carryForwardEditable:refundAgeWiseEditable, rowRemarks:true,
+      note: "Per category, the Age-Wise Breakup total (0-30 + 30-45 + 46-60 + Above 60 days) must equal that row's Closing Balance. Checked when you submit.",
+      selfValidate: (rows) => {
+        const errors = [];
+        refundCategories.forEach((labels, idx) => {
+          const label = labels[0];
+          const row = rows[idx];
+          const closingNo = parseFloat(row.Closing_No) || 0, closingAmt = parseFloat(row.Closing_Amt) || 0;
+          const ageTotalNo = (parseFloat(row.Age_0to30_No)||0)+(parseFloat(row.Age_30to45_No)||0)+(parseFloat(row.Age_46to60_No)||0)+(parseFloat(row.Age_Above60_No)||0);
+          const ageTotalAmt = (parseFloat(row.Age_0to30_Amt)||0)+(parseFloat(row.Age_30to45_Amt)||0)+(parseFloat(row.Age_46to60_Amt)||0)+(parseFloat(row.Age_Above60_Amt)||0);
+          if (Math.abs(ageTotalNo - closingNo) > 0.01) errors.push(label + ': Age-Wise Breakup total No. (' + round3(ageTotalNo) + ') does not match Closing Balance No. (' + round3(closingNo) + ')');
+          if (Math.abs(ageTotalAmt - closingAmt) > 0.01) errors.push(label + ': Age-Wise Breakup total Amt (₹' + round3(ageTotalAmt) + ') does not match Closing Balance Amt (₹' + round3(closingAmt) + ')');
+        });
+        return errors;
+      },
+      carryForward: [ { from:'Closing_No', to:'Opening_No' }, { from:'Closing_Amt', to:'Opening_Amt' } ] },
+    { id:'UIN', label:'UIN Refund', type:'uin' },
+    { id:'SBY', label:'SBY', sheet:'SBY', type:'flat',
+      fields:["SBY01_ForMonth","SBY01_UptoMonth","SBY02_ForMonth","SBY02_UptoMonth","SBY_Opening_No","SBY_Opening_Amt","Claims_Received_ForMonth_No","Claims_Received_ForMonth_Amt","Claims_Received_UptoMonth_No","Claims_Received_UptoMonth_Amt","Claims_Sanctioned_ForMonth_No","Claims_Sanctioned_ForMonth_Amt","Claims_Sanctioned_UptoMonth_No","Claims_Sanctioned_UptoMonth_Amt","Claims_Rejected_ForMonth_No","Claims_Rejected_ForMonth_Amt","Claims_Rejected_UptoMonth_No","Claims_Rejected_UptoMonth_Amt"],
+      computed: [
+        { id:'SBY_Closing_No', calc:g => g('SBY_Opening_No')+g('Claims_Received_ForMonth_No')-g('Claims_Sanctioned_ForMonth_No')-g('Claims_Rejected_ForMonth_No') },
+        { id:'SBY_Closing_Amt', calc:g => g('SBY_Opening_Amt')+g('Claims_Received_ForMonth_Amt')-g('Claims_Sanctioned_ForMonth_Amt')-g('Claims_Rejected_ForMonth_Amt') }
+      ],
+      carryForward: [ { from:'SBY_Closing_No', to:'SBY_Opening_No' }, { from:'SBY_Closing_Amt', to:'SBY_Opening_Amt' } ] }
+  ]},
+  Return: { title:"Return", subtabs:[ { id:'RTN1', label:'RTN-1: Filing Status', type:'return' } ]},
+  Adjudication: { title:"Adjudication", subtabs:[
+    { id:'ADJ1', label:'ADJ-1: Pendency', sheet:'Adj1', type:'matrix', rowLabelKeys:['Authority','Case_Origin'], rows:adjRows, fields:adjFields, computedFields:adjComputed, cumulativeFields:adjCumulative,
+      carryForward: [ { from:'Closing_No', to:'Opening_No' }, { from:'Closing_Amt', to:'Opening_Amt' } ],
+      carryForwardEditable: adjAgeAndTimeLeftEditable,
+      note: "Per row, Age-Wise Breakup total and Time-Left-for-Adjudication total must each equal that row's Closing Balance (auto). Checked when you submit.",
+      onRecalcRow: (idx, get) => {
+        if (!adj1Snapshot) adj1Snapshot = new Array(adjRows.length).fill(null);
+        adj1Snapshot[idx] = {
+          Disposal_No: round3(get('Disposal_Order_No')+get('Disposal_CallBook_No')+get('Disposal_Other_No')),
+          Disposal_Amt: round3(get('Disposal_Order_Amt')+get('Disposal_CallBook_Amt')+get('Disposal_Other_Amt')),
+          Age_Total: round3(get('Age_Less3Months')+get('Age_3to6Months')+get('Age_6to12Months')+get('Age_MoreThan1Year')),
+          TimeLeft_Total: round3(get('TimeLeft_Less3Months')+get('TimeLeft_3to6Months')+get('TimeLeft_6to12Months')+get('TimeLeft_MoreThan1Year')),
+          Closing_No: get('Closing_No')
+        };
+      },
+      selfValidate: () => {
+        const errors = [];
+        if (!adj1Snapshot) return errors;
+        adjRows.forEach((labels, idx) => {
+          const snap = adj1Snapshot[idx];
+          if (!snap) return;
+          const label = labels.join(' — ');
+          if (Math.abs(snap.Age_Total - snap.Closing_No) > 0.01) {
+            errors.push(label + ': Age-Wise Breakup total (' + snap.Age_Total + ') does not match Closing Balance No. (' + snap.Closing_No + ')');
+          }
+          if (Math.abs(snap.TimeLeft_Total - snap.Closing_No) > 0.01) {
+            errors.push(label + ': Time-Left-for-Adjudication total (' + snap.TimeLeft_Total + ') does not match Closing Balance No. (' + snap.Closing_No + ')');
+          }
+        });
+        return errors;
+      } },
+    { id:'ADJ1A', label:'ADJ-1A: Disposal Break-up', sheet:'Adj1A', type:'matrix', rowLabelKeys:['Authority','Case_Origin'], rows:adj1aRows, fields:adj1aFields,
+      note: "Fill ADJ-1: Pendency first. Each row's break-up total (Demand Confirmed + Dropped + Partially Confirmed + Partially Dropped + Transferred) must match that row's Disposal total in ADJ-1. Checked when you submit.",
+      crossValidate: (rows) => {
+        const errors = [];
+        if (!adj1Snapshot || adj1Snapshot.every(s => s === null)) {
+          errors.push('Please fill in ADJ-1: Pendency first — ADJ-1A is checked against its Disposal totals.');
+          return errors;
+        }
+        rows.forEach((r, idx) => {
+          const snap = adj1Snapshot[idx];
+          const label = adj1aRows[idx].join(' — ');
+          if (!snap) { errors.push(label + ': matching row in ADJ-1 has not been filled yet.'); return; }
+          const totalNo = round3((parseFloat(r.DemandConfirmed_No)||0) + (parseFloat(r.DemandDropped_No)||0) + (parseFloat(r.PartiallyConfirmed_No)||0) + (parseFloat(r.PartiallyDropped_No)||0) + (parseFloat(r.TransferredOther_No)||0));
+          const totalAmt = round3((parseFloat(r.DemandConfirmed_Amt)||0) + (parseFloat(r.DemandDropped_Amt)||0) + (parseFloat(r.PartiallyConfirmed_Amt)||0) + (parseFloat(r.PartiallyDropped_Amt)||0) + (parseFloat(r.TransferredOther_Amt)||0));
+          if (Math.abs(totalNo - snap.Disposal_No) > 0.01) {
+            errors.push(label + ': Break-up total No. (' + totalNo + ') does not match ADJ-1 Disposal No. (' + snap.Disposal_No + ')');
+          }
+          if (Math.abs(totalAmt - snap.Disposal_Amt) > 0.01) {
+            errors.push(label + ': Break-up total Amt (₹' + totalAmt + ') does not match ADJ-1 Disposal Amt (₹' + snap.Disposal_Amt + ')');
+          }
+        });
+        return errors;
+      } }
+  ]},
+  ITC: { title:"ITC", subtabs:[
+    { id:'ITC1', label:'ITC-1: Blocking/Unblocking', sheet:'ITC', type:'matrix', rowLabelKeys:['Ground'], rows:itcGrounds, fields:itcFields, computedFields:itcComputed,
+      carryForwardEditable: itcPendingOver1Yr,
+      note: "Pending Over 1 Year is pre-filled from last period where available, but stays editable — adjust it manually: subtract if any of those aged cases were unblocked/disposed this period, or add if any case from the Opening Balance has now crossed the one-year mark. It cannot exceed that row's Closing Balance. Checked when you submit.",
+      selfValidate: (rows) => {
+        const errors = [];
+        itcGrounds.forEach((labels, idx) => {
+          const label = labels.join(' — ');
+          const row = rows[idx];
+          const pendingNo = parseFloat(row.PendingOver1Yr_No) || 0;
+          const pendingAmt = parseFloat(row.PendingOver1Yr_Amt) || 0;
+          const closingNo = parseFloat(row.Closing_No) || 0;
+          const closingAmt = parseFloat(row.Closing_Amt) || 0;
+          if (pendingNo > closingNo + 0.01) {
+            errors.push(label + ': Pending Over 1 Year No. (' + pendingNo + ') cannot exceed Closing Balance No. (' + closingNo + ')');
+          }
+          if (pendingAmt > closingAmt + 0.01) {
+            errors.push(label + ': Pending Over 1 Year Amt (₹' + pendingAmt + ') cannot exceed Closing Balance Amt (₹' + closingAmt + ')');
+          }
+        });
+        return errors;
+      },
+      carryForward: [ { from:'Closing_No', to:'Opening_No' }, { from:'Closing_Amt', to:'Opening_Amt' } ] }
+  ]},
+  ConfirmedDemands: { title:"Confirmed Demands", subtabs:[
+    { id:'CD1', label:'Confirmed Demands', sheet:'ConfirmedDemands', type:'confirmedDemands', rowLabelKeys:['Division'], rows:cdRows, groups:cdGroups }
+  ]}
+};
+
+let currentTop = 'Registration', currentSub = 'REG1';
+
+function switchTop(k){ if (!formUnlocked) return; currentTop = k; currentSub = CONFIG[k].subtabs[0].id; renderTabs(); renderForm(); }
+function switchSub(id){ if (!formUnlocked) return; currentSub = id; renderTabs(); renderForm(); }
+
+function renderTabs(){
+  const topBar = document.getElementById('topTabs'); topBar.innerHTML = '';
+  Object.keys(CONFIG).forEach(k=>{
+    const b = document.createElement('button');
+    b.className = 'tab-btn' + (k===currentTop?' active':'');
+    b.textContent = CONFIG[k].title;
+    b.disabled = !formUnlocked;
+    b.onclick = ()=>switchTop(k);
+    topBar.appendChild(b);
+  });
+  const subBar = document.getElementById('subTabs'); subBar.innerHTML = '';
+  const subtabs = CONFIG[currentTop].subtabs;
+  if (subtabs.length > 1){
+    subtabs.forEach(st=>{
+      const b = document.createElement('button');
+      b.className = 'subtab-btn' + (st.id===currentSub?' active':'');
+      b.textContent = st.label;
+      b.disabled = !formUnlocked;
+      b.onclick = ()=>switchSub(st.id);
+      subBar.appendChild(b);
+    });
+  }
+}
+
+function buildFlatForm(cfg){
+  const wrap = document.createElement('div');
+  const prevData = previousPeriodData[cfg.sheet];
+  let banner = '<h4>'+cfg.label+'</h4>';
+  if (cfg.carryForward) {
+    if (prevData && prevData.found) {
+      banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balance carried forward from week ending ' + prevData.week + '.</p>';
+    } else if (prevData) {
+      banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:6px 10px;border-radius:6px;font-size:12px;color:#856404;margin:4px 0;">No prior submission found for this Division — enter Opening balance manually (first-time entry).</p>';
+    }
+  }
+  if (cfg.cumulativeFields && prevData && prevData.found) {
+    banner += '<p style="background:#e3f2fd;border:1px solid #90caf9;padding:6px 10px;border-radius:6px;font-size:12px;color:#0d47a1;margin:4px 0;">✓ "Upto Month" figures continue from week ending ' + prevData.week + ', plus whatever you enter below for this period.</p>';
+  }
+  wrap.innerHTML = banner;
+  const grid = document.createElement('div'); grid.className='flat-grid';
+  cfg.fields.forEach(f=>{
+    const d = document.createElement('div');
+    const cf = (cfg.carryForward||[]).find(m => m.to === f);
+    const prevRow = (cf && prevData && prevData.found) ? prevData.rows[0] : null;
+    const lab = document.createElement('label'); lab.textContent = prettify(f) + (prevRow ? ' (carried forward)' : '');
+    const inp = document.createElement('input'); inp.type='number'; inp.id = cfg.sheet+'_'+f;
+    if (prevRow) {
+      inp.value = prevRow[cf.from] !== undefined ? round3(parseFloat(prevRow[cf.from]) || 0) : 0;
+      inp.readOnly = true;
+      inp.style.background = '#e8f5e9'; inp.style.fontWeight = 'bold';
+      inp.title = 'Carried forward from previous period (' + prevData.week + ')';
+    } else {
+      inp.value = getFieldState(cfg.sheet+'_'+f, 0);
+    }
+    inp.addEventListener('input', ()=>{ saveFieldState(cfg.sheet+'_'+f, inp.value); recalcFlat(cfg, wrap); });
+    d.appendChild(lab); d.appendChild(inp); grid.appendChild(d);
+  });
+  (cfg.computed||[]).forEach(cf=>{
+    const d = document.createElement('div');
+    const lab = document.createElement('label'); lab.textContent = prettify(cf.id) + ' (auto)';
+    const inp = document.createElement('input'); inp.type='number'; inp.value=0; inp.id = cfg.sheet+'_'+cf.id;
+    inp.readOnly = true; inp.style.background = '#eef2f7'; inp.style.fontWeight = 'bold';
+    d.appendChild(lab); d.appendChild(inp); grid.appendChild(d);
+  });
+  (cfg.cumulativeFields||[]).forEach(cfl=>{
+    const d = document.createElement('div');
+    let baseline = 0;
+    if (prevData && prevData.found) baseline = parseFloat(prevData.rows[0][cfl.upto]) || 0;
+    const lab = document.createElement('label');
+    lab.textContent = prettify(cfl.upto) + ' (auto' + (prevData && prevData.found ? ', cumulative' : '') + ')';
+    const inp = document.createElement('input'); inp.type='number'; inp.value=0; inp.id = cfg.sheet+'_'+cfl.upto;
+    inp.readOnly = true; inp.style.background = '#e3f2fd'; inp.style.fontWeight = 'bold';
+    inp.dataset.baseline = baseline;
+    inp.title = 'Previous period Upto Month (' + round3(baseline) + ') + this period\'s figure entered above';
+    d.appendChild(lab); d.appendChild(inp); grid.appendChild(d);
+  });
+  wrap.appendChild(grid);
+  const remLab = document.createElement('label'); remLab.textContent='Remarks';
+  const remInp = document.createElement('input'); remInp.type='text'; remInp.id=cfg.sheet+'_Remarks';
+  remInp.style.width='100%'; remInp.style.boxSizing='border-box';
+  remInp.value = getFieldState(cfg.sheet+'_Remarks', '');
+  remInp.addEventListener('input', ()=> saveFieldState(cfg.sheet+'_Remarks', remInp.value));
+  wrap.appendChild(remLab); wrap.appendChild(remInp);
+  wrap.appendChild(buildModeRow(cfg.sheet));
+  const btn = document.createElement('button'); btn.type='button'; btn.className='submit';
+  btn.textContent = 'Submit ' + cfg.label;
+  btn.onclick = ()=>{
+    const row = commonFields();
+    cfg.fields.forEach(f=> row[f] = wrap.querySelector('#'+cfg.sheet+'_'+f).value);
+    (cfg.computed||[]).forEach(cf=> row[cf.id] = wrap.querySelector('#'+cfg.sheet+'_'+cf.id).value);
+    (cfg.cumulativeFields||[]).forEach(cfl=> row[cfl.upto] = wrap.querySelector('#'+cfg.sheet+'_'+cfl.upto).value);
+    row.Remarks = wrap.querySelector('#'+cfg.sheet+'_Remarks').value;
+    submitWithModeCheck(cfg.sheet, [row], getSelectedMode(wrap));
+  };
+  wrap.appendChild(btn);
+  recalcFlat(cfg, wrap);
+  return wrap;
+}
+
+function recalcFlat(cfg, wrap){
+  const get = (id) => {
+    const el = wrap.querySelector('#'+cfg.sheet+'_'+id);
+    return el ? (parseFloat(el.value) || 0) : 0;
+  };
+  (cfg.computed||[]).forEach(cf=>{
+    const el = wrap.querySelector('#'+cfg.sheet+'_'+cf.id);
+    if (el) el.value = round3(cf.calc(get));
+  });
+  (cfg.cumulativeFields||[]).forEach(cfl=>{
+    const el = wrap.querySelector('#'+cfg.sheet+'_'+cfl.upto);
+    if (el) {
+      const baseline = parseFloat(el.dataset.baseline) || 0;
+      el.value = round3(baseline + get(cfl.during));
+    }
+  });
+}
+
+function buildMatrixForm(cfg){
+  const wrap = document.createElement('div');
+  const prevData = previousPeriodData[cfg.sheet];
+  let banner = '<h4>'+cfg.label+'</h4>';
+  if (cfg.note) banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:8px 12px;border-radius:6px;font-size:12px;color:#856404;margin:6px 0;">⚠ '+cfg.note+'</p>';
+  if (cfg.carryForward) {
+    if (prevData && prevData.found) {
+      banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balances carried forward, row by row, from week ending ' + prevData.week + ' (where a matching row existed).</p>';
+    } else if (prevData) {
+      banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:6px 10px;border-radius:6px;font-size:12px;color:#856404;margin:4px 0;">No prior submission found for this Division — enter Opening balances manually (first-time entry).</p>';
+    }
+  }
+  if (cfg.cumulativeFields && prevData && prevData.found) {
+    banner += '<p style="background:#e3f2fd;border:1px solid #90caf9;padding:6px 10px;border-radius:6px;font-size:12px;color:#0d47a1;margin:4px 0;">✓ "Upto Month" columns continue from week ending ' + prevData.week + ', row by row, plus whatever you enter this period.</p>';
+  }
+  if (cfg.carryForwardEditable && prevData && prevData.found) {
+    banner += '<p style="background:#fff9e6;border:1px solid #f0d878;padding:6px 10px;border-radius:6px;font-size:12px;color:#7a5c00;margin:4px 0;">✓ Pre-filled from week ending ' + prevData.week + ' where a matching row existed — but still editable, so you can adjust it if any of those cases were unblocked/disposed this period.</p>';
+  }
+  wrap.innerHTML = banner;
+  const scroll = document.createElement('div'); scroll.className='scroll';
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr>' + cfg.rowLabelKeys.map(()=>'<th></th>').join('') + cfg.fields.map(f=>'<th>'+prettify(f)+'</th>').join('') + (cfg.computedFields||[]).map(cf=>'<th>'+prettify(cf.id)+' (auto)</th>').join('') + (cfg.postComputedFields||[]).map(f=>'<th>'+prettify(f)+'</th>').join('') + (cfg.carryForwardEditable||[]).map(cf=>'<th>'+prettify(cf.to)+'</th>').join('') + (cfg.cumulativeFields||[]).map(cfl=>'<th>'+prettify(cfl.upto)+' (auto)</th>').join('') + (cfg.rowRemarks?'<th>Remarks</th>':'') + '</tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  cfg.rows.forEach((labels, idx)=>{
+    const tr = document.createElement('tr');
+    labels.forEach(l=>{ const td=document.createElement('td'); td.textContent=l; td.className='rowlabel'; tr.appendChild(td); });
+    const prevRow = (cfg.carryForward || cfg.cumulativeFields || cfg.carryForwardEditable) ? findPrevRow(cfg, labels) : null;
+    cfg.fields.forEach(f=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='number';
+      inp.dataset.row=idx; inp.dataset.field=f;
+      const cf = (cfg.carryForward||[]).find(m => m.to === f);
+      if (cf && prevRow) {
+        inp.value = prevRow[cf.from] !== undefined ? round3(parseFloat(prevRow[cf.from]) || 0) : 0;
+        inp.readOnly = true;
+        inp.style.background = '#e8f5e9'; inp.style.fontWeight = 'bold';
+        inp.title = 'Carried forward from previous period';
+      } else {
+        inp.value = getFieldState(cfg.sheet+'_row'+idx+'_'+f, 0);
+      }
+      inp.addEventListener('input', ()=>{ saveFieldState(cfg.sheet+'_row'+idx+'_'+f, inp.value); recalcMatrixRow(cfg, idx, tbody); });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    (cfg.computedFields||[]).forEach(cf=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='number'; inp.value=0;
+      inp.readOnly = true; inp.style.background='#eef2f7'; inp.style.fontWeight='bold';
+      inp.dataset.row=idx; inp.dataset.field=cf.id;
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    (cfg.postComputedFields||[]).forEach(f=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='number';
+      inp.value = getFieldState(cfg.sheet+'_row'+idx+'_'+f, 0);
+      inp.dataset.row=idx; inp.dataset.field=f;
+      inp.addEventListener('input', ()=>{ saveFieldState(cfg.sheet+'_row'+idx+'_'+f, inp.value); recalcMatrixRow(cfg, idx, tbody); });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    (cfg.carryForwardEditable||[]).forEach(cf=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='number';
+      const stateKey = cfg.sheet+'_row'+idx+'_'+cf.to;
+      if (formFieldState[stateKey] !== undefined) {
+        inp.value = formFieldState[stateKey];
+      } else if (prevRow && prevRow[cf.from] !== undefined) {
+        inp.value = round3(parseFloat(prevRow[cf.from]) || 0);
+        inp.style.background = '#fff9e6';
+        inp.title = 'Pre-filled from previous period' + (prevData && prevData.week ? ' (' + prevData.week + ')' : '') + ' — still editable; adjust if any of these cases were unblocked/disposed this period, or if any case has newly crossed one year.';
+      } else {
+        inp.value = 0;
+      }
+      inp.dataset.row=idx; inp.dataset.field=cf.to;
+      inp.addEventListener('input', ()=>{ saveFieldState(stateKey, inp.value); inp.style.background=''; recalcMatrixRow(cfg, idx, tbody); });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    (cfg.cumulativeFields||[]).forEach(cfl=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='number'; inp.value=0;
+      inp.readOnly = true; inp.style.background='#e3f2fd'; inp.style.fontWeight='bold';
+      inp.dataset.row=idx; inp.dataset.field=cfl.upto;
+      const baseline = prevRow ? (parseFloat(prevRow[cfl.upto]) || 0) : 0;
+      inp.dataset.baseline = baseline;
+      inp.title = 'Previous period Upto Month (' + round3(baseline) + ') + this period\'s figure entered for ' + prettify(cfl.during);
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    if (cfg.rowRemarks) {
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type='text'; inp.style.width='120px';
+      inp.value = getFieldState(cfg.sheet+'_row'+idx+'_Remarks', '');
+      inp.dataset.row=idx; inp.dataset.field='Remarks';
+      inp.addEventListener('input', ()=> saveFieldState(cfg.sheet+'_row'+idx+'_Remarks', inp.value));
+      td.appendChild(inp); tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody); scroll.appendChild(table); wrap.appendChild(scroll);
+  cfg.rows.forEach((_,idx)=> recalcMatrixRow(cfg, idx, tbody));
+  wrap.appendChild(buildModeRow(cfg.sheet));
+  const btn = document.createElement('button'); btn.type='button'; btn.className='submit';
+  btn.textContent = 'Submit ' + cfg.label;
+  btn.onclick = ()=>{
+    const common = commonFields();
+    const rows = cfg.rows.map(labels=>{
+      const obj = Object.assign({}, common);
+      cfg.rowLabelKeys.forEach((k,i)=>obj[k]=labels[i]);
+      return obj;
+    });
+    tbody.querySelectorAll('input').forEach(inp=>{ rows[+inp.dataset.row][inp.dataset.field] = inp.value; });
+
+    let errors = [];
+    if (cfg.selfValidate) errors = errors.concat(cfg.selfValidate(rows) || []);
+    if (cfg.crossValidate) errors = errors.concat(cfg.crossValidate(rows) || []);
+    if (errors.length) {
+      document.getElementById('msg').innerHTML = '❌ Cannot submit — please fix:<br>' + errors.map(e => '• ' + e).join('<br>');
+      document.getElementById('msg').style.color = 'red';
+      return;
+    }
+
+    submitWithModeCheck(cfg.sheet, rows, getSelectedMode(wrap));
+  };
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+function recalcMatrixRow(cfg, idx, tbody){
+  const get = (field) => {
+    const inp = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+field+'"]');
+    return inp ? (parseFloat(inp.value)||0) : 0;
+  };
+  (cfg.computedFields||[]).forEach(cf=>{
+    const target = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+cf.id+'"]');
+    if (target) target.value = round3(cf.calc(get));
+  });
+  (cfg.cumulativeFields||[]).forEach(cfl=>{
+    const target = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+cfl.upto+'"]');
+    if (target) {
+      const baseline = parseFloat(target.dataset.baseline) || 0;
+      target.value = round3(baseline + get(cfl.during));
+    }
+  });
+  if (cfg.onRecalcRow) cfg.onRecalcRow(idx, get);
+}
+
+// ---- Confirmed Demands: a two-tier table (column-groups, each No/Cash/ITC/Total), per division row ----
+// PrevMonth carries forward (locked) from last period's CurrMonth; YTD groups are cumulative
+// (last period's YTD baseline + this period's Current Month); Total = Cash + ITC; plus % change YTD.
+function buildConfirmedDemandsForm(cfg){
+  const wrap = document.createElement('div');
+  const weekEnding = document.getElementById('Week_Ending').value;
+
+  if (!isFirstFridayOfMonthJS_(weekEnding)) {
+    const [yyyy, mm, dd] = weekEnding.split('-');
+    wrap.innerHTML = '<h4>'+cfg.label+'</h4>' +
+      '<p style="background:#e3f2fd;border:1px solid #90caf9;padding:12px 16px;border-radius:6px;font-size:13px;color:#0d47a1;">' +
+      '📅 <b>Confirmed Demands is only filed once a month, on the first Friday.</b><br><br>' +
+      'The Week Ending currently selected (' + dd + '-' + mm + '-' + yyyy + ') is not the first Friday of its month, so submission is not needed — or allowed — here.<br><br>' +
+      'If you need to file for last month\'s figures, select the <b>first Friday</b> of the current month from the Week Ending dropdown above, then return to this tab.' +
+      '</p>';
+    return wrap;
+  }
+
+  const prevData = previousPeriodData[cfg.sheet];
+  const parts = ['No','Cash','ITC'];
+  let banner = '<h4>'+cfg.label+'</h4>';
+  banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:8px 12px;border-radius:6px;font-size:12px;color:#856404;margin:6px 0;">Enter <b>No / Cash / ITC</b> under Current Month and Current Month (Previous FY). Totals, Year-to-Date figures, and % change are calculated automatically. Enter <b>Cash and ITC amounts in ₹ Lakh</b>, matching the original paper report — for example, enter <b>25</b> for what the report shows as "25 Lakh", not the full <b>25,00,000</b>.</p>';
+  banner += '<p style="background:#e3f2fd;border:1px solid #90caf9;padding:8px 12px;border-radius:6px;font-size:12px;color:#0d47a1;margin:6px 0;">📅 Confirmed Demands is filed <b>once a month</b>, on the <b>first Friday</b> — it finalizes the previous month\'s figures, unlike the other reports which are filed every week. On other weeks, this tab is not required and won\'t appear as pending in reminders or the dashboard.</p>';
+  if (prevData && prevData.found) {
+    banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Previous Month carried forward from week ending ' + prevData.week + ' (last period\'s Current Month). Year-to-Date figures continue from there and add this period\'s Current Month on top.</p>';
+  } else if (prevData) {
+    banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:6px 10px;border-radius:6px;font-size:12px;color:#856404;margin:4px 0;">No prior submission found for this Division — Previous Month and Year-to-Date start from zero (first-time entry).</p>';
+  }
+  wrap.innerHTML = banner;
+
+  const scroll = document.createElement('div'); scroll.className='scroll';
+  const table = document.createElement('table');
+
+  // Two header rows: group labels spanning 4 cols each, then No/Cash/ITC/Total under each.
+  let head = '<thead><tr><th rowspan="2">Division</th>';
+  cfg.groups.forEach(g => { head += '<th colspan="4">'+g.label+'</th>'; });
+  head += '<th colspan="2">% Change in YTD (Prev FY)</th></tr><tr>';
+  cfg.groups.forEach(() => { head += '<th>No</th><th>Cash (₹ Lakh)</th><th>ITC (₹ Lakh)</th><th>Total (₹ Lakh)</th>'; });
+  head += '<th>No %</th><th>Amount %</th></tr></thead>';
+  table.innerHTML = head;
+
+  const tbody = document.createElement('tbody');
+  const selectedDivision = document.getElementById('Division').value;
+  const visibleRows = cfg.rows.filter(labels => labels[0] === selectedDivision);
+  visibleRows.forEach((labels, idx) => {
+    const division = labels[0];
+    const prevRow = (prevData && prevData.found) ? (prevData.rows || []).find(r => String(r.Division) === String(division)) : null;
+    const tr = document.createElement('tr');
+    let cells = '<td class="rowlabel">'+division+'</td>';
+    cfg.groups.forEach(g => {
+      parts.forEach(p => {
+        const field = g.key+'_'+p;
+        const locked = (g.mode === 'carry' || g.mode === 'cumul');
+        cells += '<td><input type="number" data-row="'+idx+'" data-field="'+field+'" '+(locked?'readonly':'')+'></td>';
+      });
+      cells += '<td><input type="number" data-row="'+idx+'" data-field="'+g.key+'_Total" readonly style="background:#eef2f7;font-weight:bold;"></td>';
+    });
+    cells += '<td><input type="number" data-row="'+idx+'" data-field="PctChange_No" readonly style="background:#fff9c4;font-weight:bold;"></td>';
+    cells += '<td><input type="number" data-row="'+idx+'" data-field="PctChange_Amount" readonly style="background:#fff9c4;font-weight:bold;"></td>';
+    tr.innerHTML = cells;
+    tbody.appendChild(tr);
+
+    // Initialise values: carry-forward (locked green), cumulative baselines, or persisted/blank inputs.
+    cfg.groups.forEach(g => {
+      parts.forEach(p => {
+        const field = g.key+'_'+p;
+        const inp = tr.querySelector('input[data-field="'+field+'"]');
+        if (g.mode === 'carry') {
+          const v = prevRow ? (parseFloat(prevRow['CurrMonth_'+p]) || 0) : 0;
+          inp.value = round3(v);
+          inp.style.background = '#e8f5e9'; inp.style.fontWeight = 'bold';
+          inp.title = 'Carried forward from previous period\'s Current Month';
+        } else if (g.mode === 'cumul') {
+          const baseline = prevRow ? (parseFloat(prevRow[field]) || 0) : 0;
+          inp.dataset.baseline = baseline;
+          inp.style.background = '#ffe0b2'; inp.style.fontWeight = 'bold';
+          inp.title = 'Year-to-date: previous period ('+round3(baseline)+') + this period\'s Current Month';
+          inp.value = round3(baseline);
+        } else {
+          inp.value = getFieldState(cfg.sheet+'_row'+idx+'_'+field, 0);
+          inp.addEventListener('input', ()=>{ saveFieldState(cfg.sheet+'_row'+idx+'_'+field, inp.value); recalcCD(cfg, idx, tbody); });
+        }
+      });
+    });
+  });
+  table.appendChild(tbody);
+  scroll.appendChild(table); wrap.appendChild(scroll);
+  visibleRows.forEach((_, idx) => recalcCD(cfg, idx, tbody));
+
+  wrap.appendChild(buildModeRow(cfg.sheet));
+  const btn = document.createElement('button'); btn.type='button'; btn.className='submit';
+  btn.textContent = 'Submit ' + cfg.label;
+  btn.onclick = ()=>{
+    const common = commonFields();
+    const rows = visibleRows.map(labels => Object.assign({}, common, { Division: labels[0] }));
+    tbody.querySelectorAll('input').forEach(inp => { rows[+inp.dataset.row][inp.dataset.field] = inp.value; });
+    submitWithModeCheck(cfg.sheet, rows, getSelectedMode(wrap));
+  };
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+function recalcCD(cfg, idx, tbody){
+  const parts = ['No','Cash','ITC'];
+  const get = (field) => {
+    const inp = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+field+'"]');
+    return inp ? (parseFloat(inp.value)||0) : 0;
+  };
+  const set = (field, val) => {
+    const inp = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+field+'"]');
+    if (inp) inp.value = round3(val);
+  };
+  // Cumulative YTD groups: baseline + this period's Current Month source group.
+  cfg.groups.forEach(g => {
+    if (g.mode === 'cumul') {
+      parts.forEach(p => {
+        const inp = tbody.querySelector('input[data-row="'+idx+'"][data-field="'+g.key+'_'+p+'"]');
+        const baseline = parseFloat(inp.dataset.baseline) || 0;
+        set(g.key+'_'+p, baseline + get(g.from+'_'+p));
+      });
+    }
+  });
+  // Totals = Cash + ITC for every group.
+  cfg.groups.forEach(g => { set(g.key+'_Total', get(g.key+'_Cash') + get(g.key+'_ITC')); });
+  // % change in YTD (Current FY vs Previous FY).
+  const ytdCurNo = get('YTDCurrFY_No'), ytdPrevNo = get('YTDPrevFY_No');
+  const ytdCurTot = get('YTDCurrFY_Total'), ytdPrevTot = get('YTDPrevFY_Total');
+  set('PctChange_No', ytdPrevNo !== 0 ? ((ytdCurNo - ytdPrevNo) / ytdPrevNo) * 100 : 0);
+  set('PctChange_Amount', ytdPrevTot !== 0 ? ((ytdCurTot - ytdPrevTot) / ytdPrevTot) * 100 : 0);
+}
+
+function buildDynamicForm(cfg){
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<h4>'+cfg.label+'</h4><p style="font-size:12px;color:#666;">Click "Add a case" once per UIN refund case you have this week — leave empty if none.</p>';
+  const scroll = document.createElement('div'); scroll.className='scroll';
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr>' + cfg.fields.map(f=>'<th>'+prettify(f)+'</th>').join('') + '<th></th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  table.appendChild(tbody); scroll.appendChild(table); wrap.appendChild(scroll);
+
+  function saveDynamicRows(){
+    const rows = [];
+    tbody.querySelectorAll('tr').forEach(tr=>{
+      const obj = {};
+      tr.querySelectorAll('input').forEach(inp=> obj[inp.dataset.field] = inp.value);
+      rows.push(obj);
+    });
+    saveFieldState(cfg.sheet+'_rows', rows);
+  }
+
+  function addRow(values){
+    const tr = document.createElement('tr');
+    cfg.fields.forEach(f=>{
+      const td = document.createElement('td');
+      const inp = document.createElement('input');
+      inp.type = ['Central_Tax','State_UT_Tax','Integrated_Tax','Cess'].includes(f) ? 'number' : (f.indexOf('Period')>-1 ? 'date' : 'text');
+      inp.style.width = '100px';
+      inp.dataset.field = f;
+      if (values && values[f] !== undefined) inp.value = values[f];
+      inp.addEventListener('input', saveDynamicRows);
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    const tdDel = document.createElement('td');
+    const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.textContent='✕';
+    delBtn.onclick = ()=>{ tr.remove(); saveDynamicRows(); };
+    tdDel.appendChild(delBtn); tr.appendChild(tdDel);
+    tbody.appendChild(tr);
+  }
+  const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='submit';
+  addBtn.textContent = '+ Add a Case';
+  addBtn.onclick = ()=>{ addRow(); saveDynamicRows(); };
+  wrap.appendChild(addBtn);
+
+  wrap.appendChild(buildModeRow(cfg.sheet));
+  const subBtn = document.createElement('button'); subBtn.type='button'; subBtn.className='submit';
+  subBtn.textContent = 'Submit ' + cfg.label;
+  subBtn.onclick = ()=>{
+    const common = commonFields();
+    const rows = [];
+    tbody.querySelectorAll('tr').forEach(tr=>{
+      const obj = Object.assign({}, common);
+      tr.querySelectorAll('input').forEach(inp=> obj[inp.dataset.field] = inp.value);
+      rows.push(obj);
+    });
+    if (rows.length===0){ alert('Add at least one case row first.'); return; }
+    submitWithModeCheck(cfg.sheet, rows, getSelectedMode(wrap));
+  };
+  wrap.appendChild(subBtn);
+  const savedRows = getFieldState(cfg.sheet+'_rows', null);
+  if (savedRows && savedRows.length > 0) savedRows.forEach(v => addRow(v));
+  else addRow();
+  return wrap;
+}
+
+function buildReturnForm(){
+  const wrap = document.createElement('div');
+  const weekEnding = document.getElementById('Week_Ending').value;
+  if (!isFirstFridayOfMonthJS_(weekEnding)) {
+    const [yyyy, mm, dd] = weekEnding.split('-');
+    wrap.innerHTML = '<h4>RTN-1: Return Filing Status</h4><p style="background:#e3f2fd;border:1px solid #90caf9;padding:12px 16px;border-radius:6px;font-size:13px;color:#0d47a1;">📅 <b>Return Filing Status is filed once a month, on the first Friday.</b><br><br>' +
+      'The Week Ending currently selected (' + dd + '-' + mm + '-' + yyyy + ') is not the first Friday of its month, so submission is not needed — or allowed — here.<br><br>' +
+      'If you need to file this month\'s figures, select the <b>first Friday</b> of the current month from the Week Ending dropdown above.</p>';
+    return wrap;
+  }
+  const cols = ['GSTR1M','GSTR3BM','GSTR1Q','GSTR3BQ','CMP08','Annual'];
+  const gv = (id) => getFieldState('Return_'+id, 0);
+  wrap.innerHTML = '<h4>RTN-1: Return Filing Status</h4><div class="scroll"><table>' +
+    '<thead><tr><th></th><th>GSTR1M</th><th>GSTR3BM</th><th>GSTR-1Q</th><th>GSTR-3BQ</th><th>CMP-08</th><th>Annual</th></tr></thead><tbody>' +
+    '<tr><td class="rowlabel">Required</td>'+cols.map(c=>'<td><input type="number" id="Req_'+c+'" value="'+gv('Req_'+c)+'"></td>').join('')+'</tr>' +
+    '<tr><td class="rowlabel">Filed</td>'+cols.map(c=>'<td><input type="number" id="Filed_'+c+'" value="'+gv('Filed_'+c)+'"></td>').join('')+'</tr>' +
+    '<tr><td class="rowlabel">Not Filed (auto)</td>'+cols.map(c=>'<td><input type="number" id="NotFiled_'+c+'" value="0" readonly style="background:#eef2f7;font-weight:bold;"></td>').join('')+'</tr>' +
+    '</tbody></table></div>' +
+    '<div class="flat-grid" style="margin-top:10px;">' +
+    '<div><label>Total Not Filed (auto)</label><input type="number" id="Total_NotFiled" value="0" readonly style="background:#eef2f7;font-weight:bold;"></div>' +
+    '<div><label>GSTR-3A Issued</label><input type="number" id="GSTR3A_Issued" value="'+gv('GSTR3A_Issued')+'"></div>' +
+    '<div><label>GSTR-3A Not Issued (auto)</label><input type="number" id="GSTR3A_NotIssued" value="0" readonly style="background:#eef2f7;font-weight:bold;"></div></div>' +
+    '<label>Remarks</label><input type="text" id="Remarks" style="width:100%;box-sizing:border-box;" value="'+getFieldState('Return_Remarks','').replace(/"/g,'&quot;')+'">';
+
+  function recalcReturn(){
+    let total = 0;
+    cols.forEach(c=>{
+      const req = parseFloat(wrap.querySelector('#Req_'+c).value) || 0;
+      const filed = parseFloat(wrap.querySelector('#Filed_'+c).value) || 0;
+      const nf = round3(req - filed);
+      wrap.querySelector('#NotFiled_'+c).value = nf;
+      total += nf;
+    });
+    wrap.querySelector('#Total_NotFiled').value = round3(total);
+    const issued = parseFloat(wrap.querySelector('#GSTR3A_Issued').value) || 0;
+    wrap.querySelector('#GSTR3A_NotIssued').value = round3(total - issued);
+  }
+  wrap.querySelectorAll('input:not([readonly])').forEach(inp => inp.addEventListener('input', ()=>{ saveFieldState('Return_'+inp.id, inp.value); recalcReturn(); }));
+
+  wrap.appendChild(buildModeRow('Return'));
+  const btn = document.createElement('button'); btn.type='button'; btn.className='submit';
+  btn.textContent = 'Submit Return Report';
+  btn.onclick = ()=>{
+    const row = commonFields();
+    cols.forEach(c=>{
+      row['Req_'+c] = wrap.querySelector('#Req_'+c).value;
+      row['Filed_'+c] = wrap.querySelector('#Filed_'+c).value;
+      row['NotFiled_'+c] = wrap.querySelector('#NotFiled_'+c).value;
+    });
+    row.Total_NotFiled = wrap.querySelector('#Total_NotFiled').value;
+    row.GSTR3A_Issued = wrap.querySelector('#GSTR3A_Issued').value;
+    row.GSTR3A_NotIssued = wrap.querySelector('#GSTR3A_NotIssued').value;
+    row.Remarks = wrap.querySelector('#Remarks').value;
+    submitWithModeCheck('Return', [row], getSelectedMode(wrap));
+  };
+  wrap.appendChild(btn);
+  recalcReturn();
+  return wrap;
+}
+
+function renderForm(){
+  const el = document.getElementById('formArea'); el.innerHTML = '';
+  if (!formUnlocked) {
+    const division = document.getElementById('Division').value;
+    const week = document.getElementById('Week_Ending').value;
+    let msg;
+    if (!division || !week) msg = '🔒 Select Division and Week Ending above to continue.';
+    else if (passwordCheckState === 'checking') msg = '🔒 Checking password...';
+    else if (!passwordIsCorrect()) msg = '🔒 Enter your division\'s password above to continue.';
+    else msg = '🔓 Ready — click "Fetch Previous Period Closing Balances" above to unlock this form for data entry.';
+    const p = document.createElement('div');
+    p.className = 'lock-message';
+    p.textContent = msg;
+    el.appendChild(p);
+    return;
+  }
+  const subtab = CONFIG[currentTop].subtabs.find(s=>s.id===currentSub);
+  if (subtab.type==='flat') el.appendChild(buildFlatForm(subtab));
+  else if (subtab.type==='matrix') el.appendChild(buildMatrixForm(subtab));
+  else if (subtab.type==='confirmedDemands') el.appendChild(buildConfirmedDemandsForm(subtab));
+  else if (subtab.type==='return') el.appendChild(buildReturnForm());
+  else if (subtab.type==='uin'){
+    el.appendChild(buildFlatForm(UIN_SUMMARY_CFG));
+    el.appendChild(document.createElement('hr'));
+    el.appendChild(buildDynamicForm(UIN_CASES_CFG));
+  }
+}
+
+initCommonFields();
+renderTabs();
+renderForm();
+</script>
+</body>
+</html>
