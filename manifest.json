@@ -1,6 +1,6 @@
 {
-  "name": "Divisional MIS Report",
-  "short_name": "GST-MPR",
+  "name": "GST-MPR-NET",
+  "short_name": "GST-MPR-NET",
   "description": "Weekly/Monthly GST Performance Report filing for Haldia Commissionerate divisions",
   "start_url": "./index.html",
   "display": "standalone",
