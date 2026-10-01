@@ -2,7 +2,7 @@
 // reliably, and caches the app shell so it opens instantly even on a weak connection. It never
 // caches the actual data requests (checkPassword, submit, fetchAllPrevious, etc.) - those must
 // always hit the live Apps Script backend, never a stale cached copy.
-const CACHE_NAME = 'gst-mpr-shell-v1';
+const CACHE_NAME = 'gst-mpr-shell-v2';
 const SHELL_FILES = ['./index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
