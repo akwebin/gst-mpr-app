@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1a3c6e">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<title>Divisional MIS Report</title>
+<title>GST-MPR-NET</title>
 <style>
   body { font-family:Arial, sans-serif; background:#f4f6f8; margin:0; padding:16px; }
   .card { max-width:1050px; margin:auto; background:#fff; border-radius:10px; padding:20px 24px;
@@ -109,6 +109,15 @@ function round3(n){
 function isFirstFridayOfMonthJS_(weekEndingYMD){
   const dd = parseInt(weekEndingYMD.split('-')[2], 10);
   return dd <= 7;
+}
+// "Upto Month" cumulative fields (ADJ-1's ReceiptUptoMonth etc.) are Financial-Year-to-date figures
+// - they accumulate continuously from April through March, resetting ONLY at the start of a new
+// Financial Year (April), not at every calendar month boundary.
+function isFirstFridayOfAprilJS_(weekEndingYMD){
+  const parts = weekEndingYMD.split('-');
+  const mm = parseInt(parts[1], 10);
+  const dd = parseInt(parts[2], 10);
+  return mm === 4 && dd <= 7;
 }
 function commonFields(){
   return {
@@ -841,7 +850,11 @@ function buildFlatForm(cfg){
   let banner = '<h4>'+cfg.label+'</h4>';
   if (cfg.carryForward) {
     if (prevData && prevData.found) {
-      banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balance carried forward from week ending ' + prevData.week + '.</p>';
+      if (prevData.source === 'locked_monthly') {
+        banner += '<p style="background:#e3f2fd;border:1px solid #64b5f6;padding:6px 10px;border-radius:6px;font-size:12px;color:#0d47a1;margin:4px 0;">🔒 Opening balance carried forward from the <b>LOCKED Monthly Closing</b> of week ending ' + prevData.week + ' — the previous month&#39;s final, protected figure.</p>';
+      } else {
+        banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balance carried forward from week ending ' + prevData.week + '.</p>';
+      }
     } else if (prevData) {
       banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:6px 10px;border-radius:6px;font-size:12px;color:#856404;margin:4px 0;">No prior submission found for this Division — enter Opening balance manually (first-time entry).</p>';
     }
@@ -878,7 +891,8 @@ function buildFlatForm(cfg){
   (cfg.cumulativeFields||[]).forEach(cfl=>{
     const d = document.createElement('div');
     let baseline = 0;
-    if (prevData && prevData.found) baseline = parseFloat(prevData.rows[0][cfl.upto]) || 0;
+    const currentWeekFlat = document.getElementById('Week_Ending').value;
+    if (prevData && prevData.found && !isFirstFridayOfAprilJS_(currentWeekFlat)) baseline = parseFloat(prevData.rows[0][cfl.upto]) || 0;
     const lab = document.createElement('label');
     lab.textContent = prettify(cfl.upto) + ' (auto' + (prevData && prevData.found ? ', cumulative' : '') + ')';
     const inp = document.createElement('input'); inp.type='number'; inp.value=0; inp.id = cfg.sheet+'_'+cfl.upto;
@@ -935,7 +949,11 @@ function buildMatrixForm(cfg){
   if (cfg.note) banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:8px 12px;border-radius:6px;font-size:12px;color:#856404;margin:6px 0;">⚠ '+cfg.note+'</p>';
   if (cfg.carryForward) {
     if (prevData && prevData.found) {
-      banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balances carried forward, row by row, from week ending ' + prevData.week + ' (where a matching row existed).</p>';
+      if (prevData.source === 'locked_monthly') {
+        banner += '<p style="background:#e3f2fd;border:1px solid #64b5f6;padding:6px 10px;border-radius:6px;font-size:12px;color:#0d47a1;margin:4px 0;">🔒 Opening balances carried forward from the <b>LOCKED Monthly Closing</b> of week ending ' + prevData.week + ' — the previous month&#39;s final, protected figure. Later corrections to any mid-month week cannot change this.</p>';
+      } else {
+        banner += '<p style="background:#e8f5e9;border:1px solid #a5d6a7;padding:6px 10px;border-radius:6px;font-size:12px;color:#1b5e20;margin:4px 0;">✓ Opening balances carried forward, row by row, from week ending ' + prevData.week + ' (where a matching row existed).</p>';
+      }
     } else if (prevData) {
       banner += '<p style="background:#fff3cd;border:1px solid #ffe08a;padding:6px 10px;border-radius:6px;font-size:12px;color:#856404;margin:4px 0;">No prior submission found for this Division — enter Opening balances manually (first-time entry).</p>';
     }
@@ -1010,9 +1028,11 @@ function buildMatrixForm(cfg){
       const inp = document.createElement('input'); inp.type='number'; inp.value=0;
       inp.readOnly = true; inp.style.background='#e3f2fd'; inp.style.fontWeight='bold';
       inp.dataset.row=idx; inp.dataset.field=cfl.upto;
-      const baseline = prevRow ? (parseFloat(prevRow[cfl.upto]) || 0) : 0;
+      const currentWeek = document.getElementById('Week_Ending').value;
+      const isNewFinancialYear = isFirstFridayOfAprilJS_(currentWeek);
+      const baseline = (prevRow && !isNewFinancialYear) ? (parseFloat(prevRow[cfl.upto]) || 0) : 0;
       inp.dataset.baseline = baseline;
-      inp.title = 'Previous period Upto Month (' + round3(baseline) + ') + this period\'s figure entered for ' + prettify(cfl.during);
+      inp.title = (isNewFinancialYear ? 'New Financial Year - starts fresh at 0 + ' : 'Previous period Upto Month (' + round3(baseline) + ') + ') + 'this period\'s figure entered for ' + prettify(cfl.during);
       td.appendChild(inp); tr.appendChild(td);
     });
     if (cfg.rowRemarks) {
