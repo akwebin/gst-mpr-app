@@ -541,7 +541,21 @@ function checkExistsJSONP(reportType, division, week){
   return jsonpWithTimeout_(url, 'jsonp_chk_' + reportType, { status:'error', exists:false });
 }
 
+let submitInFlight = false;
 async function submitWithModeCheck(reportType, rows, mode){
+  if (submitInFlight) return; // ignore double-tap / repeated clicks while a submission is running
+  submitInFlight = true;
+  document.querySelectorAll('button.submit').forEach(b => { if (b.id !== 'fetchPrevBtn') b.disabled = true; });
+  try { await submitWithModeCheckInner_(reportType, rows, mode); }
+  finally {
+    // keep buttons locked briefly after a send so an impatient second tap cannot re-post
+    setTimeout(() => {
+      submitInFlight = false;
+      document.querySelectorAll('button.submit').forEach(b => { if (b.id !== 'fetchPrevBtn') b.disabled = false; });
+    }, 4000);
+  }
+}
+async function submitWithModeCheckInner_(reportType, rows, mode){
   const first = rows[0] || {};
   const division = first.Division, week = first.Week_Ending;
   const msgEl = document.getElementById('msg');
