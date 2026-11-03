@@ -235,9 +235,9 @@ function initCommonFields(){
   // SYSTEM_START_DATE) that any period the "earlier pending period" check could ever reference is
   // always reachable here — previously this only showed the current calendar month, which meant a
   // genuinely pending week from an earlier month had no way to actually be selected and filed.
-  // Future weeks stay capped to the rest of the current month, as before. Each Friday unlocks the
-  // day before (Thursday) — a division can submit a day early, which matters if that Friday turns
-  // out to be a holiday.
+  // Future weeks stay capped to the rest of the current month, as before. Each Friday unlocks two
+  // days before (Wednesday) — divisions can file early, which matters when there is urgency or that
+  // Friday turns out to be a holiday.
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // strip time for a clean date-only comparison
   const currentMonth = now.getMonth(), currentYear = now.getFullYear();
 
@@ -267,6 +267,11 @@ function initCommonFields(){
   // Also include any remaining Fridays later in the current month (shown disabled, for visibility).
   let probe = new Date(anchorFriday);
   probe.setDate(probe.getDate() + 7);
+  // The very next Friday is always listed, even if it falls in the NEXT calendar month (e.g. on
+  // Wed 30-Dec its Friday is 01-Jan), otherwise the Wednesday unlock would have nothing to select.
+  if (probe.getMonth() !== currentMonth || probe.getFullYear() !== currentYear) {
+    fridaysToShow.push(new Date(probe));
+  }
   while (probe.getMonth() === currentMonth && probe.getFullYear() === currentYear) {
     fridaysToShow.push(new Date(probe));
     probe.setDate(probe.getDate() + 7);
@@ -274,7 +279,7 @@ function initCommonFields(){
 
   const sel = document.getElementById('Week_Ending');
   fridaysToShow.forEach(dt => {
-    const unlockDate = new Date(dt); unlockDate.setDate(dt.getDate() - 1); // opens the day before (Thursday)
+    const unlockDate = new Date(dt); unlockDate.setDate(dt.getDate() - 2); // opens two days before (Wednesday)
     const dd = String(dt.getDate()).padStart(2,'0');
     const mm = String(dt.getMonth()+1).padStart(2,'0');
     const yyyy = dt.getFullYear();
